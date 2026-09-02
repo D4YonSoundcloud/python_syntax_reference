@@ -12,7 +12,7 @@ Everything here is language reference material — nothing is specific to any pr
 
 ## Contents
 
-[Operators](#operators) · [Numbers](#numbers) · [Strings](#strings) · [Formatting](#string-formatting) · [Lists](#lists) · [Slicing](#slicing) · [Dictionaries](#dictionaries) · [Sets](#sets) · [Tuples](#tuples) · [Comprehensions](#comprehensions) · [Control flow](#control-flow) · [Functions](#functions) · [Classes](#classes) · [Exceptions](#exceptions) · [Sorting](#sorting) · [Iteration](#iteration-helpers) · [Built-ins](#built-in-functions) · [Standard library](#standard-library) · [Conversion](#type-conversion) · [Idioms](#general-idioms) · [Gotchas](#gotchas) · [Versions](#version-notes)
+[Operators](#operators) · [Numbers](#numbers) · [Strings](#strings) · [Formatting](#string-formatting) · [Lists](#lists) · [Slicing](#slicing) · [Dictionaries](#dictionaries) · [Sets](#sets) · [Tuples](#tuples) · [Comprehensions](#comprehensions) · [Control flow](#control-flow) · [Functions](#functions) · [Classes](#classes) · [Exceptions](#exceptions) · [Sorting](#sorting) · [Iteration](#iteration-helpers) · [Built-ins](#built-in-functions) · [Standard library](#standard-library) · [Data structures](#data-structures) · [Conversion](#type-conversion) · [Idioms](#general-idioms) · [Gotchas](#gotchas) · [Versions](#version-notes)
 
 ---
 
@@ -970,6 +970,451 @@ d1 = date(2024, 3, 1)
 (date(2024, 3, 11) - d1).days       # → 10
 datetime(2024, 1, 2, 3, 4).strftime("%Y-%m-%d %H:%M")   # → '2024-01-02 03:04'
 datetime.strptime("2024-01-02", "%Y-%m-%d").year        # → 2024
+```
+
+---
+
+## Data structures
+
+Classic structures, what each is for, and how to build one in Python. The first four are just the built-in types used a particular way — reach for those before writing a class.
+
+| Structure | Access pattern | Python | Push | Pop | Lookup |
+|---|---|---|---|---|---|
+| Stack | last in, first out | `list` | `append` O(1) | `pop()` O(1) | — |
+| Queue | first in, first out | `deque` | `append` O(1) | `popleft()` O(1) | — |
+| Deque | both ends | `deque` | O(1) either end | O(1) either end | — |
+| Heap / priority queue | smallest first | `heapq` on a `list` | `heappush` O(log n) | `heappop` O(log n) | peek O(1) |
+| Linked list | sequential | `Node` class | O(1) at head | O(1) at head | O(n) |
+| Binary search tree | ordered | `Node` class | O(log n) balanced | | O(log n) balanced |
+| Graph | neighbours | `dict` of lists | O(1) | | O(1) per node |
+| Trie | by prefix | nested `dict` | O(len) | | O(len) |
+| Union-Find | connectivity | `dict` of parents | — | — | ~O(1) |
+| LRU cache | recency | `OrderedDict` | O(1) | O(1) | O(1) |
+
+### Stack — last in, first out
+
+Undo piles, bracket matching, depth-first traversal, anything where you need the most recent item back. A plain list is already a stack.
+
+```python
+stack = []
+stack.append(1)
+stack.append(2)
+stack.append(3)
+stack[-1]                       # → 3       peek without removing
+stack.pop()                     # → 3
+stack                           # → [1, 2]
+len(stack)                      # → 2
+bool(stack)                     # → True    falsy when empty
+
+# balanced brackets, the classic use
+def balanced(text):
+    pairs = {")": "(", "]": "[", "}": "{"}
+    st = []
+    for ch in text:
+        if ch in "([{":
+            st.append(ch)
+        elif ch in pairs:
+            if not st or st.pop() != pairs[ch]:
+                return False
+    return not st
+
+balanced("a(b[c]{d})")          # → True
+balanced("(]")                  # → False
+balanced("(()")                 # → False
+```
+
+### Queue — first in, first out
+
+Job pipelines, breadth-first traversal, anything processed in arrival order. Use `deque`: `list.pop(0)` is O(n) because every remaining element shifts down.
+
+```python
+from collections import deque
+
+q = deque()
+q.append("a")
+q.append("b")
+q.append("c")
+q.popleft()                     # → 'a'     O(1); list.pop(0) would be O(n)
+list(q)                         # → ['b', 'c']
+q[0]                            # → 'b'     peek
+len(q)                          # → 2
+
+# deque works from both ends, and can be bounded
+d = deque([2, 3])
+d.appendleft(1)
+d.append(4)
+list(d)                         # → [1, 2, 3, 4]
+d.pop()                         # → 4
+d.popleft()                     # → 1
+d.rotate(1)
+list(d)                         # → [3, 2]
+
+window = deque(maxlen=3)                    # a fixed-size sliding window
+for n in [1, 2, 3, 4, 5]:
+    window.append(n)
+list(window)                    # → [3, 4, 5]    oldest items fall off
+```
+
+### Heap — always hand back the smallest
+
+A priority queue. Use it when you repeatedly need the current minimum (or maximum) and the set keeps changing. `heapq` operates on an ordinary list kept in heap order; `h[0]` is always the smallest.
+
+Python's heap is a **min-heap only**. For a max-heap, push negated values and negate on the way out.
+
+```python
+import heapq
+
+h = [5, 1, 3]
+heapq.heapify(h)                            # O(n), rearranges in place
+h[0]                            # → 1       peek at the smallest, O(1)
+heapq.heappush(h, 0)
+heapq.heappop(h)                # → 0
+heapq.heappop(h)                # → 1
+
+# max-heap: negate going in, negate coming out
+mx = []
+for v in [5, 1, 9]:
+    heapq.heappush(mx, -v)
+-heapq.heappop(mx)              # → 9
+
+# priority queue: push tuples, first element is the priority
+pq = []
+heapq.heappush(pq, (2, "later"))
+heapq.heappush(pq, (1, "sooner"))
+heapq.heappop(pq)               # → (1, 'sooner')
+
+# combined operations, cheaper than a push then a pop
+h2 = [1, 5, 9]
+heapq.heapify(h2)
+heapq.heappushpop(h2, 0)        # → 0       push then pop, in one step
+heapq.heapreplace(h2, 7)        # → 1       pop then push
+
+heapq.nlargest(2, [1, 9, 4])    # → [9, 4]
+heapq.nsmallest(2, [1, 9, 4])   # → [1, 4]
+heapq.nlargest(1, [("a", 2), ("b", 9)], key=lambda p: p[1])     # → [('b', 9)]
+```
+
+A heap is **not** sorted — only `h[0]` is guaranteed. If you need everything in order, use `sorted()`.
+
+### Linked list
+
+Rarely the right choice in Python (a `list` or `deque` is faster and simpler), but the node-and-pointer shape appears in interview-style problems.
+
+```python
+class Node:
+    def __init__(self, value, nxt=None):
+        self.value = value
+        self.next = nxt
+
+head = Node(1, Node(2, Node(3)))
+
+def to_list(node):
+    out = []
+    while node is not None:
+        out.append(node.value)
+        node = node.next
+    return out
+
+to_list(head)                   # → [1, 2, 3]
+
+def push_front(node, value):
+    return Node(value, node)
+
+to_list(push_front(head, 0))    # → [0, 1, 2, 3]
+
+def reverse(node):
+    prev = None
+    while node is not None:
+        node.next, prev, node = prev, node, node.next
+    return prev
+
+to_list(reverse(head))          # → [3, 2, 1]
+```
+
+### Binary tree and traversals
+
+```python
+class TreeNode:
+    def __init__(self, value, left=None, right=None):
+        self.value = value
+        self.left = left
+        self.right = right
+
+#         4
+#       /   \
+#      2     6
+#     / \   /
+#    1   3 5
+root = TreeNode(4, TreeNode(2, TreeNode(1), TreeNode(3)), TreeNode(6, TreeNode(5)))
+
+def inorder(n):                             # left, self, right -> sorted for a BST
+    return inorder(n.left) + [n.value] + inorder(n.right) if n else []
+
+def preorder(n):                            # self, left, right
+    return [n.value] + preorder(n.left) + preorder(n.right) if n else []
+
+def postorder(n):                           # left, right, self
+    return postorder(n.left) + postorder(n.right) + [n.value] if n else []
+
+inorder(root)                   # → [1, 2, 3, 4, 5, 6]
+preorder(root)                  # → [4, 2, 1, 3, 6, 5]
+postorder(root)                 # → [1, 3, 2, 5, 6, 4]
+
+from collections import deque
+
+def level_order(n):                         # breadth-first, row by row
+    out, q = [], deque([n])
+    while q:
+        cur = q.popleft()
+        out.append(cur.value)
+        if cur.left:
+            q.append(cur.left)
+        if cur.right:
+            q.append(cur.right)
+    return out
+
+level_order(root)               # → [4, 2, 6, 1, 3, 5]
+
+def depth(n):
+    return 1 + max(depth(n.left), depth(n.right)) if n else 0
+
+depth(root)                     # → 3
+
+def bst_contains(n, target):
+    while n:
+        if n.value == target:
+            return True
+        n = n.left if target < n.value else n.right
+    return False
+
+bst_contains(root, 5)           # → True
+bst_contains(root, 99)          # → False
+```
+
+### Graph — adjacency dict
+
+A dict mapping each node to its neighbours. That is the whole structure; no class needed.
+
+```python
+from collections import deque
+
+graph = {"a": ["b", "c"], "b": ["d"], "c": ["d"], "d": ["e"], "e": []}
+
+def bfs(g, start):                          # visits nearest first
+    seen, order, q = {start}, [], deque([start])
+    while q:
+        node = q.popleft()
+        order.append(node)
+        for nxt in g[node]:
+            if nxt not in seen:
+                seen.add(nxt)
+                q.append(nxt)
+    return order
+
+bfs(graph, "a")                 # → ['a', 'b', 'c', 'd', 'e']
+
+def dfs(g, start):                          # goes deep before wide
+    seen, order, stack = set(), [], [start]
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        order.append(node)
+        for nxt in reversed(g[node]):
+            stack.append(nxt)
+    return order
+
+dfs(graph, "a")                 # → ['a', 'b', 'd', 'e', 'c']
+
+def shortest_path(g, start, goal):          # BFS gives the fewest-edges path
+    prev, q = {start: None}, deque([start])
+    while q:
+        node = q.popleft()
+        if node == goal:
+            break
+        for nxt in g[node]:
+            if nxt not in prev:
+                prev[nxt] = node
+                q.append(nxt)
+    if goal not in prev:
+        return None
+    path, cur = [], goal
+    while cur is not None:
+        path.append(cur)
+        cur = prev[cur]
+    return path[::-1]
+
+shortest_path(graph, "a", "e")  # → ['a', 'b', 'd', 'e']
+shortest_path(graph, "e", "a")  # → None
+```
+
+### Trie — a prefix tree
+
+Stores strings by shared prefix, so "does anything start with this?" costs the length of the prefix rather than a scan of every key. Nested dicts are enough; no class required.
+
+```python
+END = "$"
+
+def build(words):
+    root = {}
+    for w in words:
+        node = root
+        for ch in w:
+            node = node.setdefault(ch, {})
+            
+        node[END] = True
+    return root
+
+trie = build(["car", "cart", "dog"])
+
+def contains(trie, word):
+    node = trie
+    for ch in word:
+        if ch not in node:
+            return False
+        node = node[ch]
+    return END in node
+
+def has_prefix(trie, prefix):
+    node = trie
+    for ch in prefix:
+        if ch not in node:
+            return False
+        node = node[ch]
+    return True
+
+contains(trie, "car")           # → True
+contains(trie, "ca")            # → False   a prefix is not a stored word
+has_prefix(trie, "ca")          # → True
+has_prefix(trie, "z")           # → False
+
+def with_prefix(trie, prefix):
+    node = trie
+    for ch in prefix:
+        if ch not in node:
+            return []
+        node = node[ch]
+    out = []
+    def walk(n, acc):
+        for k, v in sorted(n.items()):
+            if k == END:
+                out.append(prefix + acc)
+            else:
+                walk(v, acc + k)
+    walk(node, "")
+    return out
+
+with_prefix(trie, "car")        # → ['car', 'cart']
+```
+
+For a small number of strings, `[w for w in words if w.startswith(p)]` is simpler and fast enough. A trie earns its keep when the set is large and prefix queries are frequent.
+
+### Union-Find — disjoint sets
+
+Answers "are these two things in the same group?" and merges groups, both in nearly constant time. Used for connectivity and grouping.
+
+```python
+class UnionFind:
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, x):
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]     # path compression
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra == rb:
+            return False                                     # already together
+        self.parent[rb] = ra
+        return True
+
+    def connected(self, a, b):
+        return self.find(a) == self.find(b)
+
+uf = UnionFind()
+uf.union("a", "b")              # → True
+uf.union("b", "c")              # → True
+uf.union("a", "c")              # → False   already in the same group
+uf.connected("a", "c")          # → True
+uf.connected("a", "z")          # → False
+len({uf.find(x) for x in "abcz"})           # → 2       number of groups
+```
+
+### LRU cache — bounded by recency
+
+Keeps the most recently used entries and discards the oldest when full. `OrderedDict.move_to_end` makes it a few lines.
+
+```python
+from collections import OrderedDict
+
+class LRU:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.data = OrderedDict()
+
+    def get(self, key):
+        if key not in self.data:
+            return None
+        self.data.move_to_end(key)                  # reading counts as use
+        return self.data[key]
+
+    def put(self, key, value):
+        if key in self.data:
+            self.data.move_to_end(key)
+        self.data[key] = value
+        if len(self.data) > self.capacity:
+            self.data.popitem(last=False)           # drop the oldest
+
+    def keys(self):
+        return list(self.data)
+
+c = LRU(2)
+c.put("a", 1)
+c.put("b", 2)
+c.get("a")                      # → 1       "a" is now the most recent
+c.put("c", 3)                               # over capacity: "b" is evicted
+c.get("b")                      # → None
+c.keys()                        # → ['a', 'c']
+```
+
+### 2D grids
+
+```python
+grid = [[1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]]
+
+grid[1][2]                      # → 6       row first, then column
+len(grid)                       # → 3       row count
+len(grid[0])                    # → 3       column count
+
+blank = [[0] * 3 for _ in range(2)]         # build rows separately...
+blank[0][0] = 9
+blank                           # → [[9, 0, 0], [0, 0, 0]]
+
+wrong = [[0] * 3] * 2                       # ...because * copies the REFERENCE
+wrong[0][0] = 9
+wrong                           # → [[9, 0, 0], [9, 0, 0]]      all rows changed
+
+[row[1] for row in grid]        # → [2, 5, 8]       a column
+[v for row in grid for v in row]            # → [1, 2, 3, 4, 5, 6, 7, 8, 9]
+[list(r) for r in zip(*grid)]   # → [[1, 4, 7], [2, 5, 8], [3, 6, 9]]   transpose
+
+def neighbours(g, r, c):                    # four-way, bounds-checked
+    out = []
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < len(g) and 0 <= nc < len(g[0]):
+            out.append(g[nr][nc])
+    return out
+
+neighbours(grid, 1, 1)          # → [2, 8, 4, 6]
+neighbours(grid, 0, 0)          # → [4, 2]
 ```
 
 ---
