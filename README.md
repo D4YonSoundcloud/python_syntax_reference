@@ -12,7 +12,7 @@ Everything here is language reference material — nothing is specific to any pr
 
 ## Contents
 
-[Operators](#operators) · [Numbers](#numbers) · [Strings](#strings) · [Formatting](#string-formatting) · [Lists](#lists) · [Slicing](#slicing) · [Dictionaries](#dictionaries) · [Sets](#sets) · [Tuples](#tuples) · [Comprehensions](#comprehensions) · [Control flow](#control-flow) · [Functions](#functions) · [Classes](#classes) · [Exceptions](#exceptions) · [Sorting](#sorting) · [Iteration](#iteration-helpers) · [Built-ins](#built-in-functions) · [Standard library](#standard-library) · [Data structures](#data-structures) · [Conversion](#type-conversion) · [Idioms](#general-idioms) · [Gotchas](#gotchas) · [Versions](#version-notes)
+[Operators](#operators) · [Numbers](#numbers) · [Strings](#strings) · [Formatting](#string-formatting) · [Lists](#lists) · [Slicing](#slicing) · [Dictionaries](#dictionaries) · [Sets](#sets) · [Tuples](#tuples) · [Comprehensions](#comprehensions) · [Control flow](#control-flow) · [Functions](#functions) · [Classes](#classes) · [Exceptions](#exceptions) · [Sorting](#sorting) · [Iteration](#iteration-helpers) · [Built-ins](#built-in-functions) · [Standard library](#standard-library) · [Data structures](#data-structures) · [Conversion](#type-conversion) · [Absence and None](#absence-and-none) · [Idioms](#general-idioms) · [Design notes](#design-notes) · [Gotchas](#gotchas) · [Versions](#version-notes)
 
 ---
 
@@ -1098,7 +1098,7 @@ A heap is **not** sorted — only `h[0]` is guaranteed. If you need everything i
 
 ### Linked list
 
-Rarely the right choice in Python (a `list` or `deque` is faster and simpler), but the node-and-pointer shape appears in interview-style problems.
+Rarely the right choice in Python — a `list` or `deque` is faster and simpler — but the node-and-pointer shape is worth being able to read.
 
 ```python
 class Node:
@@ -1443,6 +1443,291 @@ dict(zip("ab", [1, 2]))             # → {'a': 1, 'b': 2}
 
 ---
 
+## Absence and None
+
+The single most common source of quiet bugs in Python is confusing **absent** with **present but falsy**. `None`, `0`, `""`, `[]`, `{}` and `set()` are all falsy, so `if not x:` cannot tell "there was nothing" from "there was a zero".
+
+### The rule
+
+Test for absence with `is None`. Test for emptiness with `not x`. They are different questions.
+
+```python
+missing = None
+zero = 0
+empty = []
+
+missing is None                 # → True
+zero is None                    # → False      a real value
+empty is None                   # → False      a real, empty container
+
+not missing                     # → True
+not zero                        # → True       <- the trap
+not empty                       # → True
+```
+
+| Question | Test |
+|---|---|
+| Is it absent? | `x is None` |
+| Is it present? | `x is not None` |
+| Is it empty? | `not x` or `len(x) == 0` |
+| Is it a real value, possibly zero? | `x is not None` |
+| Is it a non-empty container? | `bool(x)` |
+
+Never write `x == None`. `is` compares identity and cannot be overridden by a custom `__eq__`.
+
+### Truthiness of every builtin
+
+```python
+[bool(v) for v in (None, False, 0, 0.0, "", [], {}, set(), ())]
+                                # → [False, False, False, False, False, False, False, False, False]
+[bool(v) for v in (True, 1, -1, 0.1, "0", " ", [0], {0: 0}, {0}, (0,))]
+                                # → [True, True, True, True, True, True, True, True, True, True]
+```
+
+Note `"0"`, `" "`, `[0]` and `(0,)` are all truthy — a container holding a falsy value is itself non-empty.
+
+### Dictionaries
+
+Three different absences: the key is missing, the key exists with value `None`, and the key exists with a falsy value.
+
+| Task | Code | On a missing key |
+|---|---|---|
+| strict read | `d[k]` | raises `KeyError` |
+| safe read | `d.get(k)` | returns `None` |
+| read with a fallback | `d.get(k, default)` | returns `default` |
+| does the key exist | `k in d` | `False` |
+| remove safely | `d.pop(k, None)` | returns `None` |
+| remove strictly | `del d[k]` | raises `KeyError` |
+
+```python
+d = {"present": 1, "zero": 0, "none": None}
+
+d.get("present")                # → 1
+d.get("zero")                   # → 0
+d.get("none")                   # → None
+d.get("missing")                # → None        indistinguishable from "none"
+
+# so when None is a legitimate stored value, ask the key, not the value
+"none" in d                     # → True
+"missing" in d                  # → False
+d.get("none") is None           # → True        both look the same
+d.get("missing") is None        # → True
+
+# the falsy-value trap
+bool(d.get("zero"))             # → False       but the key is there
+d.get("zero") is not None       # → True        the correct check
+d.get("zero", -1)               # → 0           a default does NOT fire for a
+                                #               stored falsy value, only for a
+                                #               missing key
+d.get("missing", -1)            # → -1
+
+# counting how many keys hold a real value
+sum(1 for v in d.values() if v is not None)     # → 2
+```
+
+### Lists and tuples
+
+| Task | Code | When empty or absent |
+|---|---|---|
+| is it empty | `not xs` | `True` |
+| first item safely | `xs[0] if xs else None` | `None` |
+| last item safely | `xs[-1] if xs else None` | `None` |
+| index of a value | `xs.index(v)` | raises `ValueError` |
+| index safely | `xs.index(v) if v in xs else -1` | `-1` |
+| first match | `next((x for x in xs if p(x)), None)` | `None` |
+| largest | `max(xs, default=None)` | `None` |
+| slice | `xs[:n]` | `[]`, never raises |
+| index | `xs[n]` | raises `IndexError` |
+
+```python
+xs = [10, 20, 30]
+empty = []
+
+not empty                       # → True
+len(empty) == 0                 # → True
+xs[0] if xs else None           # → 10
+empty[0] if empty else None     # → None
+empty[:5]                       # → []          slices never raise
+
+xs.index(20)                    # → 1
+xs.index(99) if 99 in xs else -1        # → -1
+next((x for x in xs if x > 25), None)   # → 30
+next((x for x in xs if x > 99), None)   # → None
+max(xs, default=None)           # → 30
+max(empty, default=None)        # → None
+sum(empty)                      # → 0           sum of nothing is zero
+all(empty)                      # → True        vacuously
+any(empty)                      # → False
+
+# a list holding None is not an empty list
+holes = [None, 1, None]
+len(holes)                      # → 3
+[v for v in holes if v is not None]     # → [1]
+holes.count(None)               # → 2
+```
+
+### Strings
+
+```python
+s = "hello"
+blank = ""
+
+blank is None                   # → False       empty is not absent
+not blank                       # → True
+len(blank)                      # → 0
+
+s.find("zz")                    # → -1          never raises
+s.find("ll")                    # → 2
+s.index("ll")                   # → 2           raises ValueError if absent
+
+# find returning 0 is a real match at position 0 -- another falsy trap
+s.find("he")                    # → 0
+s.find("he") != -1              # → True        the correct "was it found" test
+bool(s.find("he"))              # → False       wrong
+
+# membership avoids the whole problem
+"ll" in s                       # → True
+"zz" in s                       # → False
+```
+
+### Sets
+
+```python
+have = {1, 2}
+
+1 in have                       # → True
+9 in have                       # → False
+not set()                       # → True        empty set is falsy
+
+have.discard(9)                               # absent is fine, no error
+# have.remove(9)                              KeyError
+len(have)                       # → 2
+```
+
+### Nested access
+
+Chaining `.get()` with an empty-container default is the usual way to reach two levels down without raising.
+
+```python
+data = {"a": {"x": 1}, "b": {}}
+
+data.get("a", {}).get("x")      # → 1
+data.get("a", {}).get("zz")     # → None
+data.get("zz", {}).get("x")     # → None        missing at the first level
+data.get("b", {}).get("x")      # → None        present but empty
+
+# the chain cannot tell you WHICH level was missing; ask explicitly if it matters
+"zz" in data                    # → False
+"a" in data and "zz" in data["a"]           # → False
+
+# for attributes rather than keys
+class Thing:
+    def __init__(self):
+        self.value = 5
+
+getattr(Thing(), "value", None)         # → 5
+getattr(Thing(), "missing", None)       # → None
+hasattr(Thing(), "missing")             # → False
+```
+
+### Functions and iterators
+
+A function with no `return` returns `None`. So does a `return` with no value, and so does a `return` that falls off the end of an `if`.
+
+```python
+def no_return():
+    pass
+
+def conditional(n):
+    if n > 0:
+        return "positive"
+    # falls off the end when n <= 0
+
+no_return()                     # → None
+conditional(1)                  # → 'positive'
+conditional(-1)                 # → None        easy to miss
+
+# mutating methods return None -- assigning their result destroys your data
+xs = [3, 1, 2]
+xs.sort()                       # → None
+xs.reverse()                    # → None
+xs.append(9)                    # → None
+[].clear()                      # → None
+
+# iterators signal exhaustion with a default rather than a value
+next(iter([]), None)            # → None
+next(iter([5]), None)           # → 5
+
+# regex returns None rather than raising
+import re
+re.match(r"\d+", "abc")         # → None
+re.search(r"\d+", "abc") is None        # → True
+bool(re.search(r"\d+", "a1"))           # → True
+```
+
+### When `None` is a legitimate value
+
+If `None` is something a caller might genuinely store, you need a sentinel that no caller can produce.
+
+```python
+MISSING = object()              # unique, and nothing else equals it
+
+store = {"set_to_none": None}
+
+store.get("set_to_none", MISSING) is MISSING        # → False   the key exists
+store.get("absent", MISSING) is MISSING             # → True    the key does not
+
+# the same idea for an optional function parameter
+def fetch(key, default=MISSING):
+    if key in store:
+        return store[key]
+    if default is MISSING:
+        raise KeyError(key)
+    return default
+
+fetch("set_to_none") is None    # → True
+fetch("absent", 0)              # → 0
+```
+
+### The `or` default, and when it misfires
+
+`value or fallback` is a compact default, but it fires on *any* falsy value, not just `None`.
+
+```python
+None or "fallback"              # → 'fallback'
+"" or "fallback"                # → 'fallback'      probably fine
+0 or 99                         # → 99              probably a bug
+[] or [1]                       # → [1]
+
+# the precise version
+def coalesce(value, fallback):
+    return fallback if value is None else value
+
+coalesce(0, 99)                 # → 0
+coalesce(None, 99)              # → 99
+coalesce("", "x")               # → ''
+```
+
+### Quick reference
+
+| Situation | Safe form | Result when absent |
+|---|---|---|
+| dict value | `d.get(k)` | `None` |
+| dict value, key may hold `None` | `k in d` | `False` |
+| dict value with fallback | `d.get(k, v)` | `v` |
+| remove from a dict | `d.pop(k, None)` | `None` |
+| first list item | `xs[0] if xs else None` | `None` |
+| list index | `xs.index(v) if v in xs else -1` | `-1` |
+| first match | `next((x for x in xs if p(x)), None)` | `None` |
+| largest | `max(xs, default=None)` | `None` |
+| substring position | `s.find(sub)` | `-1` |
+| attribute | `getattr(o, "a", None)` | `None` |
+| set removal | `st.discard(v)` | no error |
+| nested key | `d.get(a, {}).get(b)` | `None` |
+| regex | `re.search(p, s)` | `None` |
+
+---
+
 ## General idioms
 
 Compositions that come up constantly and are not written down as such in the language reference.
@@ -1540,6 +1825,236 @@ overlaps(0, 10, 10, 20)                         # → False   touching is not ov
 events = [(2, "x"), (11, "y"), (20, "z")]
 [e for t, e in events if 20 - 10 < t <= 20]     # → ['y', 'z']    the last 10 units
 ```
+
+---
+
+## Design notes
+
+Habits that keep a small program easy to change. None of this is about performance; it is about how much of your code has to move when a requirement shifts.
+
+| Habit | Why |
+|---|---|
+| Store records as objects, not bare values | adding a second field becomes additive instead of a rewrite |
+| Add new parameters with defaults | every existing call site keeps working untouched |
+| Read through one accessor | a new condition on reads lands in one place |
+| Write through one method | a new side effect on writes lands in one place |
+| Derive what you can compute | a stored total goes stale; a computed one cannot |
+| Validate fully, then mutate | a rejected operation leaves nothing behind |
+| Replace objects rather than mutate them | copies and snapshots stay independent for free |
+| Name constants and rules | a changed rule is one edit, not a search |
+| Return `None` for absent, consistently | callers get one thing to check |
+
+### Store a record, not a bare value
+
+A dict of numbers is the shortest thing that works, and the most expensive thing to grow. The moment a record needs a second attribute, every line that touched the dict has to change.
+
+```python
+# fragile: the value is the whole record
+sizes = {"a.txt": 100}
+sizes["a.txt"]                      # → 100
+
+# flexible: the value is an object with room to grow
+class Item:
+    def __init__(self, name, size):
+        self.name = name
+        self.size = size
+
+items = {"a.txt": Item("a.txt", 100)}
+items["a.txt"].size                 # → 100
+```
+
+### Add parameters with defaults
+
+New requirements arrive as new attributes. Give them defaults and nothing that already constructs the object has to be touched.
+
+```python
+class Item:
+    def __init__(self, name, size, created_at=0, tags=None):
+        self.name = name
+        self.size = size
+        self.created_at = created_at
+        self.tags = [] if tags is None else tags     # never a mutable default
+
+old_call = Item("a.txt", 100)                        # still valid
+old_call.created_at                 # → 0
+old_call.tags                       # → []
+Item("b.txt", 5, 12, ["draft"]).created_at           # → 12
+```
+
+A required positional parameter would have meant editing every caller. A default means editing none.
+
+### One place to read, one place to write
+
+Funnel access through a single accessor and a single mutator. It looks like pointless indirection right up until the rules change, at which point it is the difference between one edit and five.
+
+```python
+class Store:
+    def __init__(self):
+        self._items = {}
+        self._log = []
+
+    def _find(self, name):
+        """The only read path."""
+        return self._items.get(name)
+
+    def _apply(self, name, item):
+        """The only write path -- so auditing, history or validation has
+        exactly one place to live."""
+        self._items[name] = item
+        self._log.append(name)
+
+    def add(self, name, size):
+        if self._find(name) is not None:
+            return False
+        self._apply(name, {"name": name, "size": size})
+        return True
+
+    def size_of(self, name):
+        found = self._find(name)
+        return None if found is None else found["size"]
+
+s = Store()
+s.add("a", 10)                      # → True
+s.add("a", 20)                      # → False
+s.size_of("a")                      # → 10
+s.size_of("zz")                     # → None
+s._log                              # → ['a']
+```
+
+### Derive what you can compute
+
+A stored total is a second source of truth, and the two drift. Compute it from the records unless it is genuinely unrecoverable.
+
+```python
+rows = [{"group": "a", "n": 3, "active": True},
+        {"group": "a", "n": 5, "active": True},
+        {"group": "b", "n": 2, "active": True}]
+
+def total(group):
+    return sum(r["n"] for r in rows if r["group"] == group and r["active"])
+
+total("a")                          # → 8
+rows[0]["active"] = False
+total("a")                          # → 5       a counter could not recover this
+```
+
+The exception is a quantity that is *not* a function of current state — a lifetime total of everything ever added, say. You cannot recover that from what remains, so it has to be stored.
+
+### Validate fully, then mutate
+
+Check every rejection condition before changing anything. A half-applied operation corrupts state that later code reads.
+
+```python
+def transfer(accounts, src, dst, amount):
+    a, b = accounts.get(src), accounts.get(dst)
+    if a is None or b is None:
+        return None
+    if src == dst:
+        return None
+    if a["balance"] < amount:
+        return None                                  # nothing has changed yet
+    a["balance"] -= amount
+    b["balance"] += amount
+    return a["balance"]
+
+accounts = {"x": {"balance": 100}, "y": {"balance": 0}}
+transfer(accounts, "x", "y", 30)    # → 70
+transfer(accounts, "x", "y", 999)   # → None
+accounts["x"]["balance"]            # → 70          the failure cost nothing
+```
+
+### Replace objects rather than mutate them
+
+If nothing ever modifies a stored object in place, a shallow copy is a genuine snapshot. That single discipline is what makes cheap copying safe.
+
+```python
+class Item:
+    def __init__(self, name, count=0):
+        self.name = name
+        self.count = count
+
+    def with_count(self, n):
+        """Return a NEW item rather than editing this one."""
+        return Item(self.name, n)
+
+live = {"a": Item("a", 1)}
+snapshot = dict(live)                                # shallow copy
+
+live["a"] = live["a"].with_count(2)                  # replace, do not mutate
+live["a"].count                     # → 2
+snapshot["a"].count                 # → 1            snapshot is intact
+
+# the alternative, for comparison
+live2 = {"a": Item("a", 1)}
+snap2 = dict(live2)
+live2["a"].count = 2                                 # mutating in place
+snap2["a"].count                    # → 2            the snapshot changed too
+```
+
+### Name constants and rules
+
+A magic number scattered through a file is a search-and-replace waiting to go wrong. A rule expressed in one method is a one-character fix.
+
+```python
+class Rules:
+    PAGE_SIZE = 10
+    DAY_MS = 24 * 60 * 60 * 1000
+
+    @staticmethod
+    def within(start, length, at):
+        """Half-open interval [start, start + length). One place to change if
+        the boundary turns out to be inclusive."""
+        return start <= at < start + length
+
+Rules.PAGE_SIZE                     # → 10
+Rules.DAY_MS                        # → 86400000
+Rules.within(5, 10, 5)              # → True
+Rules.within(5, 10, 14)             # → True
+Rules.within(5, 10, 15)             # → False
+```
+
+### Return `None` for absent, consistently
+
+Pick one convention for "not there" and hold it. And remember that a legitimate `0` is falsy, so callers must test against `None` rather than truthiness.
+
+```python
+def find(items, key):
+    return items.get(key)                            # None when absent
+
+items = {"a": 0, "b": 5}
+find(items, "a")                    # → 0            a real value
+find(items, "zz")                   # → None         absent
+
+# distinguishing them
+find(items, "a") is not None        # → True
+bool(find(items, "a"))              # → False        which is why truthiness fails
+
+# an empty result is empty, not missing
+def search(items, prefix):
+    return sorted(k for k in items if k.startswith(prefix))
+
+search(items, "z")                  # → []
+```
+
+### Keep queries in one shape
+
+Most "find the top few of these" questions are the same five steps: gather, filter, sort, limit, format. Writing them in that order means an extra condition is one clause, not a restructure.
+
+```python
+records = [{"name": "b", "size": 5}, {"name": "a", "size": 5},
+           {"name": "c", "size": 9}, {"name": "d", "size": 1}]
+
+def top(records, prefix, n):
+    rows = [r for r in records if r["name"].startswith(prefix)]   # gather + filter
+    rows.sort(key=lambda r: (-r["size"], r["name"]))              # sort
+    return ["%s(%d)" % (r["name"], r["size"]) for r in rows[:n]]  # limit + format
+
+top(records, "", 3)                 # → ['c(9)', 'a(5)', 'b(5)']
+top(records, "a", 3)                # → ['a(5)']
+top(records, "zz", 3)               # → []
+```
+
+Sort before slicing, or you get the first n arbitrary matches rather than the top n.
 
 ---
 
